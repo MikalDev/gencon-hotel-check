@@ -26,8 +26,8 @@ else:
 	from urllib.parse import urlencode, urlparse
 	from urllib.request import HTTPCookieProcessor, Request, urlopen, build_opener
 
-firstDay, lastDay, startDay = datetime(2023, 7, 28), datetime(2023, 8, 8), datetime(2023, 8, 3)
-eventId = 50430831
+firstDay, lastDay, startDay = datetime(2024, 8, 1), datetime(2024, 8, 4), datetime(2024, 8, 1)
+eventId = 50729171
 ownerId = 10909638
 
 distanceUnits = {
@@ -99,6 +99,12 @@ class KeyAction(Action):
 			raise ValueError("invalid key")
 		setattr(namespace, self.dest, values)
 
+import os
+
+def mac_alert():
+    # os.system('afplay /System/Library/Sounds/siren.aiff')
+    os.system('afplay /Users/shimizu/tmp/alarm/siren.aiff')
+
 class PasskeyUrlAction(Action):
 	def __call__(self, parser, namespace, values, option_string = None):
 		url = urlparse(values)
@@ -136,7 +142,7 @@ parser.add_argument('--hotel-regex', type = type_regex, metavar = 'PATTERN', def
 parser.add_argument('--room-regex', type = type_regex, metavar = 'PATTERN', default = reCompile('.*'), help = 'regular expression to match room against')
 parser.add_argument('--show-all', action = 'store_true', help = 'show all rooms, even if miles away (these rooms never trigger alerts)')
 group = parser.add_mutually_exclusive_group()
-group.add_argument('--delay', type = int, default = 1, metavar = 'MINS', help = 'search every MINS minute(s)')
+group.add_argument('--delay', type = float, default = 1, metavar = 'MINS', help = 'search every MINS minute(s)')
 group.add_argument('--once', action = 'store_true', help = 'search once and exit')
 parser.add_argument('--test', action = 'store_true', dest = 'test', help = 'trigger every specified alert and exit')
 
@@ -197,7 +203,10 @@ for alert in args.alerts or []:
 		alertFns.append(lambda preamble, hotels, cmd = alert[1]: subprocess.Popen([cmd] + ["%s: %s" % (hotel['name'], hotel['room']) for hotel in hotels]))
 	elif alert[0] == 'browser':
 		import webbrowser
-		alertFns.append(lambda preamble, hotels: webbrowser.open(baseUrl + '/home'))
+
+		# alertFns.append(lambda preamble, hotels: webbrowser.open(baseUrl + '/home'))
+		alertFns.append(lambda preamble, hotels: webbrowser.open('https://book.passkey.com/entry?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwYXlsb2FkIjoiYTZwSEV4UDduRHUzcVFhY0hDaVBwSFRtUzdsMVM3SFVWYjV2STVuSHZWSG94elF5UjF4dDk4SlExMUwyOFVFWVRrcWFpcjJiNlhiUDNIRkRxVnRoMmNWeHVWY3gyT01IQkh6L0tPYWNsQ2c9In0.HddRno6e40KMOeJtDn7qgkkhoS1QR9rX7Zh3ma5uDyA'))
+		alertFns.append(lambda preamble, hotels: mac_alert())
 	elif alert[0] == 'email':
 		from email.mime.text import MIMEText
 		import getpass, smtplib, socket
@@ -296,15 +305,16 @@ def search():
 def parseResults():
 	resp = send('List', baseUrl + '/list/hotels')
 	parser = PasskeyParser(resp)
+	# print("Parsing..."+str(parser.json))
 	if not parser.json:
 		raise RuntimeError("Failed to find search results")
 
 	hotels = fromJS(parser.json)
 
-	print("Results:   (%s)" % datetime.now())
+	# print("Results:   (%s)" % datetime.now())
 	alerts = []
 
-	print("   %-15s %-10s %-80s %s" % ('Distance', 'Price', 'Hotel', 'Room'))
+	# print("%-15s %-10s %-10s %s" % ('Distance', 'Price', 'Hotel', 'Room'))
 	for hotel in hotels:
 		for block in hotel['blocks']:
 			# Don't show hotels miles away unless requested
@@ -350,12 +360,12 @@ def parseResults():
 	else:
 		alertHash = set()
 
-	print()
+	# print()
 	lastAlerts = alertHash
 	return True
 
 while True:
-	print("Searching... (%d %s, %d %s, %s - %s, %s)" % (args.guests, 'guest' if args.guests == 1 else 'guests', args.rooms, 'room' if args.rooms == 1 else 'rooms', args.checkin, args.checkout, 'connected' if args.max_distance == 'connected' else 'downtown' if args.max_distance is None else "within %.1f blocks" % args.max_distance))
+	print("Searching... (%d %s, %d %s, %s - %s, %s) %s" % (args.guests, 'guest' if args.guests == 1 else 'guests', args.rooms, 'room' if args.rooms == 1 else 'rooms', args.checkin, args.checkout, 'connected' if args.max_distance == 'connected' else 'downtown' if args.max_distance is None else "within %.1f blocks" % args.max_distance, datetime.now()))
 	try:
 		search()
 		parseResults()
