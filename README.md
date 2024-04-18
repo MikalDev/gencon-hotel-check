@@ -99,3 +99,6 @@ By default, the script looks for hotels near the ICC (where "near" means the dis
 * `--hotel-regex` and `--room-regex` are [regular expressions](https://en.wikipedia.org/wiki/Regular_expression) compared (case-insensitively) against the hotel name and room description. Explaining regular expressions would take a while, but here are some likely common cases:
   - To require that a particular value show up somewhere, just specify that value. To only show Marriott hotels: `--hotel-regex "marriott"`
   - To require one of a set of values show up, separate them with `|`. To only show hotels with double or queen beds: `--room-regex "double|queen"`
+
+
+python3 gencon-hotel-check.py --url https://book.passkey.com/entry?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwYXlsb2FkIjoiYTZwSEV4UDduRHUzcVFhY0hDaVBwSFRtUzdsMVM3SFVWYjV2STVuSHZWSG94elF5UjF4dDk4SlExMUwyOFVFWVRrcWFpcjJiNlhiUDNIRkRxVnRoMmNWeHVWY3gyT01IQkh6L0tPYWNsQ2c9In0.HddRno6e40KMOeJtDn7qgkkhoS1QR9rX7Zh3ma5uDyA --show-all --wednesday --guests 2 --browser

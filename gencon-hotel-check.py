@@ -10,8 +10,15 @@ from sys import stdout, version_info
 from threading import Thread
 from time import sleep
 
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, 
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    handlers=[logging.StreamHandler(), logging.FileHandler("output.log")])
+
 if version_info < (2, 7, 9):
-	print("Requires Python 2.7.9+")
+	logging.info("Requires Python 2.7.9+")
 	exit(1)
 elif version_info.major == 2:
 	from cookielib import CookieJar
@@ -102,7 +109,6 @@ class KeyAction(Action):
 import os
 
 def mac_alert():
-    # os.system('afplay /System/Library/Sounds/siren.aiff')
     os.system('afplay /Users/shimizu/tmp/alarm/siren.aiff')
 
 class PasskeyUrlAction(Action):
@@ -171,8 +177,8 @@ try:
 	if resp.getcode() == 200:
 		head = resp.read().decode('utf8')
 		if version != head:
-			print("Warning: This script is out-of-date. If you downloaded it via git, use 'git pull' to fetch the latest version. Otherwise, visit https://github.com/mrozekma/gencon-hotel-check")
-			print()
+			logging.info("Warning: This script is out-of-date. If you downloaded it via git, use 'git pull' to fetch the latest version. Otherwise, visit https://github.com/mrozekma/gencon-hotel-check")
+			logging.info("")
 except (HTTPError, IOError):
 	pass
 
@@ -196,7 +202,7 @@ for alert in args.alerts or []:
 					window.destroy()
 				alertFns.append(handle)
 			except ImportError:
-				print("Unable to show a popup. Install either win32api (if on Windows) or Tkinter")
+				logging.info("Unable to show a popup. Install either win32api (if on Windows) or Tkinter")
 				success = False
 	elif alert[0] == 'cmd':
 		import subprocess
@@ -205,7 +211,7 @@ for alert in args.alerts or []:
 		import webbrowser
 
 		# alertFns.append(lambda preamble, hotels: webbrowser.open(baseUrl + '/home'))
-		alertFns.append(lambda preamble, hotels: webbrowser.open('https://book.passkey.com/entry?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwYXlsb2FkIjoiYTZwSEV4UDduRHUzcVFhY0hDaVBwSFRtUzdsMVM3SFVWYjV2STVuSHZWSG94elF5UjF4dDk4SlExMUwyOFVFWVRrcWFpcjJiNlhiUDNIRkRxVnRoMmNWeHVWY3gyT01IQkh6L0tPYWNsQ2c9In0.HddRno6e40KMOeJtDn7qgkkhoS1QR9rX7Zh3ma5uDyA'))
+		# alertFns.append(lambda preamble, hotels: webbrowser.open('https://book.passkey.com/entry?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwYXlsb2FkIjoiYTZwSEV4UDduRHUzcVFhY0hDaVBwSFRtUzdsMVM3SFVWYjV2STVuSHZWSG94elF5UjF4dDk4SlExMUwyOFVFWVRrcWFpcjJiNlhiUDNIRkRxVnRoMmNWeHVWY3gyT01IQkh6L0tPYWNsQ2c9In0.HddRno6e40KMOeJtDn7qgkkhoS1QR9rX7Zh3ma5uDyA'))
 		alertFns.append(lambda preamble, hotels: mac_alert())
 	elif alert[0] == 'email':
 		from email.mime.text import MIMEText
@@ -232,7 +238,7 @@ for alert in args.alerts or []:
 				alertFns.append(handle)
 				return True
 			except Exception as e:
-				print(e)
+				logging.info(e)
 				return False
 		if not closure(host, fromEmail, toEmail):
 			success = False
@@ -251,7 +257,7 @@ for alert in args.alerts or []:
 			}
 			resp = urlopen(Request('https://api.pushbullet.com/v2/pushes', toJS(data).encode('utf-8'), headers))
 			if resp.getcode() != 200:
-				print("Response %d trying to send Pushbullet alert" % resp.getcode())
+				logging.info("Response %d trying to send Pushbullet alert" % resp.getcode())
 				return False
 			return True
 		alertFns.append(handle)
@@ -259,16 +265,16 @@ for alert in args.alerts or []:
 if not success:
 	exit(1)
 if not alertFns:
-	print("Warning: You have no alert methods selected, so you're not going to know about a match unless you're staring at this window when it happens. See the README for more information")
-	print()
+	logging.info("Warning: You have no alert methods selected, so you're not going to know about a match unless you're staring at this window when it happens. See the README for more information")
+	logging.info("")
 
 if args.test:
-	print("Testing alerts one at a time...")
+	logging.info("Testing alerts one at a time...")
 	preamble = 'This is a test'
 	hotels = [{'name': 'Test hotel 1', 'distance': '2 blocks', 'rooms': 1, 'room': 'Queen/Queen suite'}, {'name': 'Test hotel 2', 'distance': '5 blocks', 'rooms': 5, 'room': 'Standard King'}]
 	for fn in alertFns:
 		fn(preamble, hotels)
-	print("Done")
+	logging.info("Done")
 	exit(0)
 
 lastAlerts = set()
@@ -305,16 +311,16 @@ def search():
 def parseResults():
 	resp = send('List', baseUrl + '/list/hotels')
 	parser = PasskeyParser(resp)
-	# print("Parsing..."+str(parser.json))
+	# logging.info("Parsing..."+str(parser.json))
 	if not parser.json:
 		raise RuntimeError("Failed to find search results")
 
 	hotels = fromJS(parser.json)
 
-	# print("Results:   (%s)" % datetime.now())
+	# logging.info("Results:   (%s)" % datetime.now())
 	alerts = []
 
-	# print("%-15s %-10s %-10s %s" % ('Distance', 'Price', 'Hotel', 'Room'))
+	# logging.info("%-15s %-10s %-10s %s" % ('Distance', 'Price', 'Hotel', 'Room'))
 	for hotel in hotels:
 		for block in hotel['blocks']:
 			# Don't show hotels miles away unless requested
@@ -342,35 +348,36 @@ def parseResults():
 				alerts.append(simpleHotel)
 				stdout.write(' ! ')
 			else:
-				stdout.write('   ')
-			print(result)
+				alerts.append(simpleHotel)
+				stdout.write(' ! ')
+			logging.info(result)
 
 	global lastAlerts
 	if alerts:
 		alertHash = {(alert['name'], alert['room']) for alert in alerts}
 		if alertHash <= lastAlerts:
-			print("Skipped alerts (no new rooms in nearby hotel list)")
+			logging.info("Skipped alerts (no new rooms in nearby hotel list)")
 		else:
 			numHotels = len(set(alert['name'] for alert in alerts))
 			preamble = "%d %s near the ICC:" % (numHotels, 'hotel' if numHotels == 1 else 'hotels')
 			for fn in alertFns:
 				# Run each alert on its own thread since some (e.g. popups) are blocking and some (e.g. e-mail) can throw
 				Thread(target = fn, args = (preamble, alerts)).start()
-			print("Triggered alerts")
+			logging.info("Triggered alerts")
 	else:
 		alertHash = set()
 
-	# print()
+	# logging.info("")
 	lastAlerts = alertHash
 	return True
 
 while True:
-	print("Searching... (%d %s, %d %s, %s - %s, %s) %s" % (args.guests, 'guest' if args.guests == 1 else 'guests', args.rooms, 'room' if args.rooms == 1 else 'rooms', args.checkin, args.checkout, 'connected' if args.max_distance == 'connected' else 'downtown' if args.max_distance is None else "within %.1f blocks" % args.max_distance, datetime.now()))
+	logging.info("Searching... (%d %s, %d %s, %s - %s, %s)" % (args.guests, 'guest' if args.guests == 1 else 'guests', args.rooms, 'room' if args.rooms == 1 else 'rooms', args.checkin, args.checkout, 'connected' if args.max_distance == 'connected' else 'downtown' if args.max_distance is None else "within %.1f blocks" % args.max_distance))
 	try:
 		search()
 		parseResults()
 	except Exception as e:
-		print(str(e))
+		logging.info(str(e))
 	if args.once:
 		exit(0)
 	sleep(60 * args.delay)
