@@ -7,8 +7,9 @@ from os.path import abspath, dirname, join as pathjoin
 from re import compile as reCompile, IGNORECASE as RE_IGNORECASE
 from ssl import create_default_context as create_ssl_context, CERT_NONE, SSLError
 from sys import stdout, version_info
-from threading import Thread
+from threading import Thread, Lock
 from time import sleep
+from pynput import keyboard
 
 if version_info < (2, 7, 9):
 	print("Requires Python 2.7.9+")
@@ -26,9 +27,9 @@ else:
 	from urllib.parse import urlencode, urlparse
 	from urllib.request import HTTPCookieProcessor, Request, urlopen, build_opener
 
-firstDay, lastDay, startDay = datetime(2024, 7, 27), datetime(2024, 8, 6), datetime(2024, 8, 1)
-eventId = 50729171
-ownerId = 10909638
+firstDay, lastDay, startDay = datetime(2025, 7, 30), datetime(2025, 8, 9), datetime(2025, 7, 31)
+eventId = 50910675  # Updated Gen Con 2025 event ID
+ownerId = 10909638  # Updated Gen Con 2025 owner ID
 
 distanceUnits = {
 	1: 'blocks',
@@ -84,6 +85,50 @@ def type_regex(arg):
 	except Exception as e:
 		raise ArgumentTypeError("invalid regex '%s': %s" % (arg, e))
 
+# Add at the top with other globals
+sound_enabled = True
+sound_lock = Lock()
+
+def toggle_sound(event=None):
+	global sound_enabled
+	with sound_lock:
+		sound_enabled = not sound_enabled
+	print(f"\nSound {'disabled' if not sound_enabled else 'enabled'}")
+
+def play_bell():
+	global sound_enabled
+	with sound_lock:
+		if not sound_enabled:
+			return False
+			
+	try:
+		import os
+		import pygame
+		import time
+		
+		# Setup keyboard listener
+		listener = keyboard.Listener(on_press=lambda key: toggle_sound() if key == keyboard.Key.space else None)
+		listener.start()
+		
+		pygame.mixer.init()
+		script_dir = os.path.dirname(os.path.abspath(__file__))
+		alarm_path = os.path.join(script_dir, 'alarm.wav')
+		
+		if not os.path.exists(alarm_path):
+			print(f"Alarm file not found at: {alarm_path}")
+			return False
+		
+		sound = pygame.mixer.Sound(alarm_path)
+		channel = sound.play()
+		# Wait for sound to finish playing
+		time.sleep(args.sound_duration)
+		pygame.mixer.quit()
+		return True
+		
+	except Exception as e:
+		print(f"Bell sound failed: {str(e)}")
+		return False
+
 class KeyAction(Action):
 	def __call__(self, parser, namespace, values, option_string = None):
 		key, auth = values
@@ -119,15 +164,39 @@ class EmailAction(Action):
 			setattr(namespace, self.dest, dest)
 		dest.append(tuple(['email'] + values))
 
+def get_booking_url(hotel, block):
+    """Generate direct booking URL with all parameters"""
+    # Base URL format: https://book.passkey.com/event/50910675/owner/10909638/rooms/select
+    
+    # Required parameters
+    params = {
+        'token': args.url.split('token=')[1],  # Include auth token
+        'hotelId': hotel['id'],
+        'blockId': block['blockId'],
+        'checkIn': args.checkin,
+        'checkOut': args.checkout,
+        'guests': args.guests,
+        'rooms': args.rooms,
+        'isEdit': 'true',  # Important flag
+        'mode': 'select'   # Direct to selection
+    }
+    
+    # Build full URL
+    select_url = f"{baseUrl}/rooms/select"
+    return f"{select_url}?{urlencode(params)}"
+
 parser = ArgumentParser()
 parser.add_argument('--surname', '--lastname', action = SurnameAction, help = SUPPRESS)
 parser.add_argument('--guests', type = int, default = 1, help = 'number of guests')
 parser.add_argument('--children', type = int, default = 0, help = 'number of children')
 parser.add_argument('--rooms', type = int, default = 1, help = 'number of rooms')
 group = parser.add_mutually_exclusive_group()
-group.add_argument('--checkin', type = type_day, metavar = 'YYYY-MM-DD', default = startDay.strftime('%Y-%m-%d'), help = 'check in')
-group.add_argument('--wednesday', dest = 'checkin', action = 'store_const', const = (startDay - timedelta(1)).strftime('%Y-%m-%d'), help = 'check in on Wednesday')
-parser.add_argument('--checkout', type = type_day, metavar = 'YYYY-MM-DD', default = (startDay + timedelta(3)).strftime('%Y-%m-%d'), help = 'check out')
+group.add_argument('--checkin', type = type_day, metavar = 'YYYY-MM-DD', 
+                   default = (startDay - timedelta(1)).strftime('%Y-%m-%d'),
+                   help = 'check in (default: Wednesday %(default)s)')
+parser.add_argument('--checkout', type = type_day, metavar = 'YYYY-MM-DD', 
+                   default = (startDay + timedelta(3)).strftime('%Y-%m-%d'),
+                   help = 'check out (default: Sunday %(default)s)')
 group = parser.add_mutually_exclusive_group()
 group.add_argument('--max-distance', type = type_distance, metavar = 'BLOCKS', help = "max hotel distance that triggers an alert (or 'connected' to require skywalk hotels)")
 group.add_argument('--connected', dest = 'max_distance', action = 'store_const', const = 'connected', help = 'shorthand for --max-distance connected')
@@ -136,13 +205,17 @@ parser.add_argument('--hotel-regex', type = type_regex, metavar = 'PATTERN', def
 parser.add_argument('--room-regex', type = type_regex, metavar = 'PATTERN', default = reCompile('.*'), help = 'regular expression to match room against')
 parser.add_argument('--show-all', action = 'store_true', help = 'show all rooms, even if miles away (these rooms never trigger alerts)')
 group = parser.add_mutually_exclusive_group()
-group.add_argument('--delay', type = int, default = 1, metavar = 'MINS', help = 'search every MINS minute(s)')
+group.add_argument('--delay', type = float, default = 5, metavar = 'SECS', help = 'search every SECS second(s)')
 group.add_argument('--once', action = 'store_true', help = 'search once and exit')
 parser.add_argument('--test', action = 'store_true', dest = 'test', help = 'trigger every specified alert and exit')
+parser.add_argument('--direct-url', action='store_true', 
+    help='print direct booking URLs for matching rooms')
+parser.add_argument('--sound-duration', type=float, default=2.0,
+    help='how long to play alert sound in seconds (default: 2.0)')
 
 group = parser.add_argument_group('required arguments')
 # Both of these set 'key'; only one of them is required
-group.add_argument('--url', action = PasskeyUrlAction, help = 'passkey URL containing your token')
+group.add_argument('--url', action = PasskeyUrlAction, default = 'https://book.passkey.com/entry?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwYXlsb2FkIjoidWUxYjVQdGYxL0JaZ3lTTmtCZFFuTWw1TDZ5RGdXL1RTQzFPejhqWUhpYXh0UDRHQlZHQW1rcXh5UlVqc2wvSjRwdGhyaTRYWkdCUWdIN3hJNGYvTVFoL2M5NGJmdHRDYTFXVGttZlorTnM9In0.aoUzLCrFsgW9WVV1VmwdhMpaf3PYkDe5g6GzHEvW4Ek', help = 'passkey URL containing your token')
 
 group = parser.add_argument_group('alerts')
 group.add_argument('--popup', dest = 'alerts', action = 'append_const', const = ('popup',), help = 'show a dialog box')
@@ -150,6 +223,11 @@ group.add_argument('--cmd', dest = 'alerts', action = 'append', type = lambda ar
 group.add_argument('--browser', dest = 'alerts', action = 'append_const', const = ('browser',), help = 'open the Passkey website in the default browser')
 group.add_argument('--email', dest = 'alerts', action = EmailAction, nargs = 3, metavar = ('HOST', 'FROM', 'TO'), help = 'send an e-mail')
 group.add_argument('--pushbullet', dest = 'alerts', action = 'append', type = lambda arg: ('pushbullet', arg), metavar = 'ACCESS_TOKEN', help = 'send a Pushbullet notification')
+group.add_argument('--bell', dest = 'alerts', action = 'append_const', 
+                  const = ('bell',), help = 'play a sound when rooms are found')
+
+# Add debug flag to parser
+parser.add_argument('--debug', action='store_true', help='enable debug logging')
 
 args = parser.parse_args()
 
@@ -170,6 +248,7 @@ try:
 except (HTTPError, IOError):
 	pass
 
+genconPortalUrl = "https://www.gencon.com/housing/housing_portal/290814/118574"
 baseUrl = "https://book.passkey.com/event/%d/owner/%d" % (eventId, ownerId)
 
 # Setup the alert handlers
@@ -197,7 +276,10 @@ for alert in args.alerts or []:
 		alertFns.append(lambda preamble, hotels, cmd = alert[1]: subprocess.Popen([cmd] + ["%s: %s" % (hotel['name'], hotel['room']) for hotel in hotels]))
 	elif alert[0] == 'browser':
 		import webbrowser
-		alertFns.append(lambda preamble, hotels: webbrowser.open(baseUrl + '/home'))
+		alertFns.append(lambda preamble, hotels: [
+			webbrowser.open(get_booking_url(hotel['hotel'], hotel['block'])) 
+			for hotel in hotels
+		])
 	elif alert[0] == 'email':
 		from email.mime.text import MIMEText
 		import getpass, smtplib, socket
@@ -246,6 +328,8 @@ for alert in args.alerts or []:
 				return False
 			return True
 		alertFns.append(handle)
+	elif alert[0] == 'bell':
+		alertFns.append(lambda preamble, hotels: play_bell())
 
 if not success:
 	exit(1)
@@ -266,32 +350,60 @@ lastAlerts = set()
 cookieJar = CookieJar()
 opener = build_opener(HTTPCookieProcessor(cookieJar))
 
-def send(name, *args):
+def send(name, *request_args):
 	try:
-		resp = opener.open(*args)
+		if args.debug:
+			print(f"DEBUG - Attempting {name} request to: {request_args[0]}")
+		resp = opener.open(*request_args)
 		if resp.getcode() != 200:
-			raise RuntimeError("%s failed: %d" % (name, resp.getcode()))
+			content = resp.read().decode('utf8')
+			if args.debug:
+				print(f"DEBUG - Error response content: {content}")
+			raise RuntimeError(f"{name} failed: {resp.getcode()} - {content}")
 		return resp
 	except URLError as e:
-		raise RuntimeError("%s failed: %s" % (name, e))
+		if args.debug:
+			print(f"DEBUG - URLError details: {str(e)}")
+		raise RuntimeError(f"{name} failed: {e}")
+	except Exception as e:
+		if args.debug:
+			print(f"DEBUG - Unexpected error details: {str(e)}")
+		raise RuntimeError(f"{name} failed with unexpected error: {e}")
 
 def search():
 	'''Search using a reservation key (for users who don't have a booking yet)'''
-	resp = send('Session request', args.url)
-	# For some reason getting a cookie out of the CookieJar is overly complicated, so this uses the internal _cookies field
-	xsrfToken = cookieJar._cookies['book.passkey.com']['/']['XSRF-TOKEN'].value
-
-	data = {
-		'_csrf': xsrfToken,
-		'hotelId': '0',
-		'blockMap.blocks[0].blockId': '0',
-		'blockMap.blocks[0].checkIn': args.checkin,
-		'blockMap.blocks[0].checkOut': args.checkout,
-		'blockMap.blocks[0].numberOfGuests': str(args.guests),
-		'blockMap.blocks[0].numberOfRooms': str(args.rooms),
-		'blockMap.blocks[0].numberOfChildren': str(args.children),
-	}
-	return send('Search', baseUrl + '/rooms/select', urlencode(data).encode('utf8'))
+	try:
+		# Try the direct token method
+		resp = send('Session request', args.url)
+		if args.debug:
+			print(f"DEBUG - Session response code: {resp.getcode()}")
+		
+		if 'XSRF-TOKEN' not in cookieJar._cookies['book.passkey.com']['/']:
+			raise RuntimeError("Failed to get XSRF token")
+		
+		xsrfToken = cookieJar._cookies['book.passkey.com']['/']['XSRF-TOKEN'].value
+		if args.debug:
+			print(f"DEBUG - Got XSRF token: {xsrfToken}")
+		
+		data = {
+			'_csrf': xsrfToken,
+			'hotelId': '0',
+			'blockMap.blocks[0].blockId': '0',
+			'blockMap.blocks[0].checkIn': args.checkin,
+			'blockMap.blocks[0].checkOut': args.checkout,
+			'blockMap.blocks[0].numberOfGuests': str(args.guests),
+			'blockMap.blocks[0].numberOfRooms': str(args.rooms),
+			'blockMap.blocks[0].numberOfChildren': str(args.children),
+		}
+		
+		select_url = f"https://book.passkey.com/event/{eventId}/owner/{ownerId}/rooms/select"
+		return send('Select request', select_url, urlencode(data).encode('utf8'))
+			
+	except Exception as e:
+		if args.debug:
+			print(f"DEBUG - Search failed with error: {str(e)}")
+			print(f"DEBUG - Cookie jar contents: {list(cookieJar)}")
+		raise
 
 def parseResults():
 	resp = send('List', baseUrl + '/list/hotels')
@@ -300,11 +412,39 @@ def parseResults():
 		raise RuntimeError("Failed to find search results")
 
 	hotels = fromJS(parser.json)
+	
+	# Initialize search counter if not exists
+	if not hasattr(parseResults, 'search_count'):
+		parseResults.search_count = 0
+	parseResults.search_count += 1
 
-	print("Results:   (%s)" % datetime.now())
+	# Check for available hotels
+	available_hotels = False
+	for hotel in hotels:
+		if not hotel or hotel['distanceUnit'] == 3:
+			continue
+		for block in hotel['blocks']:
+			if (hotel['distanceUnit'] != 3 or args.show_all) and any(inv['available'] > 0 for inv in block['inventory']):
+				available_hotels = True
+				break
+		if available_hotels:
+			break
+
+	# Print timestamp/dots or hotel results
+	if not available_hotels:
+		if parseResults.search_count % 72 == 1:  # Show timestamp every 72 searches
+			print(f"\n{datetime.now().strftime('%H:%M:%S')}", end=' ', flush=True)
+		print(".", end='', flush=True)
+		return True
+
+	# Results found - show full format with newline first
+	print("\n" + datetime.now().strftime('%H:%M:%S'), end=' ')
+	print("%-10s %-8s %-30s %s" % ('Distance', 'Price', 'Hotel', 'Room'))
+
 	alerts = []
+	showed_results = False
+	alertHash = set()
 
-	print("   %-15s %-10s %-80s %s" % ('Distance', 'Price', 'Hotel', 'Room'))
 	for hotel in hotels:
 		for block in hotel['blocks']:
 			# Don't show hotels miles away unless requested
@@ -318,10 +458,13 @@ def parseResults():
 				'price': int(sum(inv['rate'] for inv in block['inventory'])),
 				'rooms': min(inv['available'] for inv in block['inventory']),
 				'room': parser.unescape(block['name']),
+				'hotel': hotel,  # Keep reference to full hotel data
+				'block': block   # Keep reference to full block data
 			}
 			if simpleHotel['rooms'] == 0:
 				continue
-			result = "%-15s $%-9s %-80s (%d) %s" % (simpleHotel['distance'], simpleHotel['price'], simpleHotel['name'], simpleHotel['rooms'], simpleHotel['room'])
+			showed_results = True
+			result = "%-10s $%-7s %-30s (%d) %s" % (simpleHotel['distance'], simpleHotel['price'], simpleHotel['name'][:27] + '...' if len(simpleHotel['name']) > 27 else simpleHotel['name'], simpleHotel['rooms'], simpleHotel['room'])
 			# I don't think these distances (yards, meters, kilometers) actually appear in the results, but if they do assume it must be close enough regardless of --max-distance
 			closeEnough = hotel['distanceUnit'] in (2, 4, 5) or \
 			              (hotel['distanceUnit'] == 1 and (args.max_distance is None or (isinstance(args.max_distance, float) and hotel['distanceFromEvent'] <= args.max_distance))) or \
@@ -335,6 +478,9 @@ def parseResults():
 				stdout.write('   ')
 			print(result)
 
+			if args.direct_url and closeEnough and cheapEnough and regexMatch:
+				print(f"\nDirect booking URL: {get_booking_url(hotel, block)}")
+
 	global lastAlerts
 	if alerts:
 		alertHash = {(alert['name'], alert['room']) for alert in alerts}
@@ -344,18 +490,30 @@ def parseResults():
 			numHotels = len(set(alert['name'] for alert in alerts))
 			preamble = "%d %s near the ICC:" % (numHotels, 'hotel' if numHotels == 1 else 'hotels')
 			for fn in alertFns:
-				# Run each alert on its own thread since some (e.g. popups) are blocking and some (e.g. e-mail) can throw
+				# Run each alert on its own thread since some (e.g. popups) are blocking
 				Thread(target = fn, args = (preamble, alerts)).start()
 			print("Triggered alerts")
-	else:
-		alertHash = set()
 
-	print()
+	# Only print newline if we showed results
+	if showed_results:
+		print()
+
 	lastAlerts = alertHash
 	return True
 
+# Print search parameters once at start
+print("Searching... (%d %s, %d %s, %s - %s, %s)" % (
+	args.guests, 
+	'guest' if args.guests == 1 else 'guests',
+	args.rooms, 
+	'room' if args.rooms == 1 else 'rooms',
+	args.checkin,
+	args.checkout,
+	'connected' if args.max_distance == 'connected' else 'downtown' if args.max_distance is None else "within %.1f blocks" % args.max_distance
+))
+
+# Main search loop
 while True:
-	print("Searching... (%d %s, %d %s, %s - %s, %s)" % (args.guests, 'guest' if args.guests == 1 else 'guests', args.rooms, 'room' if args.rooms == 1 else 'rooms', args.checkin, args.checkout, 'connected' if args.max_distance == 'connected' else 'downtown' if args.max_distance is None else "within %.1f blocks" % args.max_distance))
 	try:
 		search()
 		parseResults()
@@ -363,4 +521,4 @@ while True:
 		print(str(e))
 	if args.once:
 		exit(0)
-	sleep(60 * args.delay)
+	sleep(args.delay)
