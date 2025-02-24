@@ -1,5 +1,7 @@
 #!/usr/bin/env python2
 from __future__ import print_function
+import os
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 from argparse import Action, ArgumentParser, ArgumentError, ArgumentTypeError, SUPPRESS
 from datetime import datetime, timedelta
 from json import loads as fromJS, dumps as toJS
@@ -8,7 +10,7 @@ from re import compile as reCompile, IGNORECASE as RE_IGNORECASE
 from ssl import create_default_context as create_ssl_context, CERT_NONE, SSLError
 from sys import stdout, version_info
 from threading import Thread, Lock
-from time import sleep
+from time import sleep, time
 from pynput import keyboard
 
 if version_info < (2, 7, 9):
@@ -88,6 +90,12 @@ def type_regex(arg):
 # Add at the top with other globals
 sound_enabled = True
 sound_lock = Lock()
+
+# Add after other global variables
+MIN_REQUEST_INTERVAL = 1.0  # Minimum seconds between requests
+last_request_time = 0
+request_in_progress = False
+request_lock = Lock()
 
 def toggle_sound(event=None):
 	global sound_enabled
@@ -517,13 +525,48 @@ print("Searching... (%d %s, %d %s, %s - %s, %s)" % (
 	'connected' if args.max_distance == 'connected' else 'downtown' if args.max_distance is None else "within %.1f blocks" % args.max_distance
 ))
 
-# Main search loop
-while True:
-	try:
-		search()
-		parseResults()
-	except Exception as e:
-		print(str(e))
-	if args.once:
-		exit(0)
-	sleep(args.delay)
+def main_search_loop():
+    global last_request_time, request_in_progress
+    
+    while True:
+        try:
+            current_time = time()
+            time_since_last = current_time - last_request_time
+            
+            # Skip if another request is in progress or if too soon
+            with request_lock:
+                if request_in_progress:
+                    if args.debug:
+                        print("\nDEBUG - Skipping search - previous request still in progress")
+                    sleep(args.delay)
+                    continue
+                    
+                if time_since_last < MIN_REQUEST_INTERVAL:
+                    if args.debug:
+                        print(f"\nDEBUG - Skipping search - too soon ({time_since_last:.1f}s < {MIN_REQUEST_INTERVAL}s)")
+                    sleep(args.delay)
+                    continue
+                
+                request_in_progress = True
+                last_request_time = current_time
+            
+            # Perform search
+            search()
+            parseResults()
+            
+            # Mark request as complete
+            with request_lock:
+                request_in_progress = False
+                
+        except Exception as e:
+            with request_lock:
+                request_in_progress = False
+            print(str(e))
+            
+        if args.once:
+            exit(0)
+            
+        sleep(args.delay)
+
+# Replace the final while loop with:
+main_search_loop()
