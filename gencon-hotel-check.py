@@ -213,6 +213,10 @@ parser.add_argument('--direct-url', action='store_true',
 parser.add_argument('--sound-duration', type=float, default=2.0,
     help='how long to play alert sound in seconds (default: 2.0)')
 
+# Add after the other parser arguments, before the alerts group
+parser.add_argument('--always-include', type = type_regex, metavar = 'PATTERN',
+                   help = 'hotels matching this regex will be included regardless of distance')
+
 group = parser.add_argument_group('required arguments')
 # Both of these set 'key'; only one of them is required
 group.add_argument('--url', action = PasskeyUrlAction, default = 'https://book.passkey.com/entry?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwYXlsb2FkIjoidWUxYjVQdGYxL0JaZ3lTTmtCZFFuTWw1TDZ5RGdXL1RTQzFPejhqWUhpYXh0UDRHQlZHQW1rcXh5UlVqc2wvSjRwdGhyaTRYWkdCUWdIN3hJNGYvTVFoL2M5NGJmdHRDYTFXVGttZlorTnM9In0.aoUzLCrFsgW9WVV1VmwdhMpaf3PYkDe5g6GzHEvW4Ek', help = 'passkey URL containing your token')
@@ -468,7 +472,8 @@ def parseResults():
 			# I don't think these distances (yards, meters, kilometers) actually appear in the results, but if they do assume it must be close enough regardless of --max-distance
 			closeEnough = hotel['distanceUnit'] in (2, 4, 5) or \
 			              (hotel['distanceUnit'] == 1 and (args.max_distance is None or (isinstance(args.max_distance, float) and hotel['distanceFromEvent'] <= args.max_distance))) or \
-			              (args.max_distance == 'connected' and connected)
+			              (args.max_distance == 'connected' and connected) or \
+			              (args.always_include and args.always_include.search(simpleHotel['name']))
 			cheapEnough = simpleHotel['price'] <= args.budget
 			regexMatch = args.hotel_regex.search(simpleHotel['name']) and args.room_regex.search(simpleHotel['room'])
 			if closeEnough and cheapEnough and regexMatch:
