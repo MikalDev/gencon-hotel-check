@@ -12,8 +12,6 @@ import sys
 from sys import stdout, version_info
 from threading import Thread, Lock
 from time import sleep, time
-from pynput import keyboard
-
 def resource_path(relative_path):
 	"""Return path to a resource, works for dev and PyInstaller --onefile."""
 	try:
@@ -122,10 +120,6 @@ def play_bell():
 		import os
 		import pygame
 		import time
-		
-		# Setup keyboard listener
-		listener = keyboard.Listener(on_press=lambda key: toggle_sound() if key == keyboard.Key.space else None)
-		listener.start()
 		
 		pygame.mixer.init()
 		alarm_path = resource_path('alarm.wav')

@@ -23,9 +23,6 @@ a = Analysis(
         'tkinter.messagebox',
         'pygame',
         'pygame.mixer',
-        # pynput uses backend-specific modules that PyInstaller misses
-        'pynput.keyboard._win32',
-        'pynput.mouse._win32',
     ],
     hookspath=[],
     hooksconfig={},

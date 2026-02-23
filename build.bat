@@ -6,7 +6,7 @@ echo.
 
 REM ── 1. Install / upgrade build + runtime dependencies ───────────────────────
 echo [1/3] Installing dependencies...
-pip install --quiet --upgrade pyinstaller pygame pynput pywin32
+pip install --quiet --upgrade pyinstaller pygame pywin32
 if errorlevel 1 (
     echo ERROR: pip install failed.
     exit /b 1
