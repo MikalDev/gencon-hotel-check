@@ -29,9 +29,9 @@ else:
 	from urllib.parse import urlencode, urlparse
 	from urllib.request import HTTPCookieProcessor, Request, urlopen, build_opener
 
-firstDay, lastDay, startDay = datetime(2025, 7, 30), datetime(2025, 8, 9), datetime(2025, 7, 31)
-eventId = 50910675  # Updated Gen Con 2025 event ID
-ownerId = 10909638  # Updated Gen Con 2025 owner ID
+firstDay, lastDay, startDay = datetime(2026, 7, 28), datetime(2026, 8, 9), datetime(2026, 7, 30)
+eventId = 51118112  # Updated Gen Con 2026 event ID
+ownerId = 10909638  # Updated Gen Con 2026 owner ID
 
 distanceUnits = {
 	1: 'blocks',
@@ -174,13 +174,13 @@ class EmailAction(Action):
 
 def get_booking_url(hotel, block):
     """Generate direct booking URL with all parameters"""
-    # Base URL format: https://book.passkey.com/event/50910675/owner/10909638/rooms/select
+    # Base URL format: https://book.passkey.com/event/51118112/owner/10909638/rooms/select
     
     # Required parameters
     params = {
         'token': args.url.split('token=')[1],  # Include auth token
         'hotelId': hotel['id'],
-        'blockId': block['blockId'],
+        'blockId': block['id'],
         'checkIn': args.checkin,
         'checkOut': args.checkout,
         'guests': args.guests,
@@ -216,6 +216,7 @@ group = parser.add_mutually_exclusive_group()
 group.add_argument('--delay', type = float, default = 5, metavar = 'SECS', help = 'search every SECS second(s)')
 group.add_argument('--once', action = 'store_true', help = 'search once and exit')
 parser.add_argument('--test', action = 'store_true', dest = 'test', help = 'trigger every specified alert and exit')
+parser.add_argument('--test-url', action = 'store_true', dest = 'test_url', help = 'do a real search, print the booking URL for the first available room, and exit')
 parser.add_argument('--direct-url', action='store_true', 
     help='print direct booking URLs for matching rooms')
 parser.add_argument('--sound-duration', type=float, default=2.0,
@@ -227,7 +228,7 @@ parser.add_argument('--always-include', type = type_regex, metavar = 'PATTERN',
 
 group = parser.add_argument_group('required arguments')
 # Both of these set 'key'; only one of them is required
-group.add_argument('--url', action = PasskeyUrlAction, default = 'https://book.passkey.com/entry?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwYXlsb2FkIjoidWUxYjVQdGYxL0JaZ3lTTmtCZFFuTWw1TDZ5RGdXL1RTQzFPejhqWUhpYXh0UDRHQlZHQW1rcXh5UlVqc2wvSjRwdGhyaTRYWkdCUWdIN3hJNGYvTVFoL2M5NGJmdHRDYTFXVGttZlorTnM9In0.aoUzLCrFsgW9WVV1VmwdhMpaf3PYkDe5g6GzHEvW4Ek', help = 'passkey URL containing your token')
+group.add_argument('--url', action = PasskeyUrlAction, default = 'https://book.passkey.com/entry?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwYXlsb2FkIjoiYWRnaWVqSkcrNElTbzdJSDYvcENUL0o0VkJhMVZlRnBzcGhWNitaSGlzSVpxbUFBRW1rVTlkQmh0SzNDTGRnRXRRZi84SktNNklTSkV6dmxicmZ0Z3pacU1vekFRcW1wZnU1KzJncjBoZjg9In0.Ge3wzQaU-IDl7h2aXh1aOTFMl-l7kU-ODMOBKS2mxqA', help = 'passkey URL containing your token')
 
 group = parser.add_argument_group('alerts')
 group.add_argument('--popup', dest = 'alerts', action = 'append_const', const = ('popup',), help = 'show a dialog box')
@@ -235,7 +236,7 @@ group.add_argument('--cmd', dest = 'alerts', action = 'append', type = lambda ar
 group.add_argument('--browser', dest = 'alerts', action = 'append_const', const = ('browser',), help = 'open the Passkey website in the default browser')
 group.add_argument('--email', dest = 'alerts', action = EmailAction, nargs = 3, metavar = ('HOST', 'FROM', 'TO'), help = 'send an e-mail')
 group.add_argument('--pushbullet', dest = 'alerts', action = 'append', type = lambda arg: ('pushbullet', arg), metavar = 'ACCESS_TOKEN', help = 'send a Pushbullet notification')
-group.add_argument('--bell', dest = 'alerts', action = 'append_const', 
+group.add_argument('--bell', dest = 'alerts', action = 'append_const',
                   const = ('bell',), help = 'play a sound when rooms are found')
 
 # Add debug flag to parser
@@ -247,18 +248,6 @@ if args.url is None and not args.test:
 	parser.print_usage()
 	exit(1)
 
-# Attempt to check the version against Github, but ignore it if it fails
-# Only updating the version when a breaking bug is fixed (a crash or a failure to search correctly)
-try:
-	version = open(pathjoin(dirname(abspath(__file__)), 'version')).read()
-	resp = urlopen('https://raw.githubusercontent.com/mrozekma/gencon-hotel-check/master/version')
-	if resp.getcode() == 200:
-		head = resp.read().decode('utf8')
-		if version != head:
-			print("Warning: This script is out-of-date. If you downloaded it via git, use 'git pull' to fetch the latest version. Otherwise, visit https://github.com/mrozekma/gencon-hotel-check")
-			print()
-except (HTTPError, IOError):
-	pass
 
 genconPortalUrl = "https://www.gencon.com/housing/housing_portal/290814/118574"
 baseUrl = "https://book.passkey.com/event/%d/owner/%d" % (eventId, ownerId)
@@ -288,10 +277,7 @@ for alert in args.alerts or []:
 		alertFns.append(lambda preamble, hotels, cmd = alert[1]: subprocess.Popen([cmd] + ["%s: %s" % (hotel['name'], hotel['room']) for hotel in hotels]))
 	elif alert[0] == 'browser':
 		import webbrowser
-		alertFns.append(lambda preamble, hotels: [
-			webbrowser.open(get_booking_url(hotel['hotel'], hotel['block'])) 
-			for hotel in hotels
-		])
+		alertFns.append(lambda preamble, hotels: webbrowser.open(baseUrl + '/home'))
 	elif alert[0] == 'email':
 		from email.mime.text import MIMEText
 		import getpass, smtplib, socket
@@ -416,6 +402,31 @@ def search():
 			print(f"DEBUG - Search failed with error: {str(e)}")
 			print(f"DEBUG - Cookie jar contents: {list(cookieJar)}")
 		raise
+
+if args.test_url:
+	print("Testing booking URL (real search)...")
+	try:
+		search()
+		resp = send('List', baseUrl + '/list/hotels')
+		parser2 = PasskeyParser(resp)
+		if not parser2.json:
+			raise RuntimeError("No results returned — check your token and event IDs")
+		hotels_data = fromJS(parser2.json)
+		for hotel in hotels_data:
+			if not hotel:
+				continue
+			for block in hotel['blocks']:
+				if any(inv['available'] > 0 for inv in block['inventory']):
+					print(f"Hotel:    {hotel['name']}")
+					print(f"Room:     {block['name']}")
+					print(f"Open URL: {baseUrl}/home")
+					exit(0)
+		print("Search succeeded but no rooms are currently available.")
+		print(f"Open URL: {baseUrl}/home")
+	except Exception as e:
+		print(f"Error: {e}")
+		exit(1)
+	exit(0)
 
 def parseResults():
 	resp = send('List', baseUrl + '/list/hotels')
