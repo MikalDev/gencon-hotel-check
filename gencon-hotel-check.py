@@ -8,10 +8,19 @@ from json import loads as fromJS, dumps as toJS
 from os.path import abspath, dirname, join as pathjoin
 from re import compile as reCompile, IGNORECASE as RE_IGNORECASE
 from ssl import create_default_context as create_ssl_context, CERT_NONE, SSLError
+import sys
 from sys import stdout, version_info
 from threading import Thread, Lock
 from time import sleep, time
 from pynput import keyboard
+
+def resource_path(relative_path):
+	"""Return path to a resource, works for dev and PyInstaller --onefile."""
+	try:
+		base = sys._MEIPASS  # PyInstaller extracts files here at runtime
+	except AttributeError:
+		base = os.path.dirname(os.path.abspath(__file__))
+	return os.path.join(base, relative_path)
 
 if version_info < (2, 7, 9):
 	print("Requires Python 2.7.9+")
@@ -119,8 +128,7 @@ def play_bell():
 		listener.start()
 		
 		pygame.mixer.init()
-		script_dir = os.path.dirname(os.path.abspath(__file__))
-		alarm_path = os.path.join(script_dir, 'alarm.wav')
+		alarm_path = resource_path('alarm.wav')
 		
 		if not os.path.exists(alarm_path):
 			print(f"Alarm file not found at: {alarm_path}")

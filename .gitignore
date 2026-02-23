@@ -3,3 +3,7 @@ node_modules/
 *.log
 credentials.json
 .booking.lock
+# PyInstaller build output
+build/
+dist/
+__pycache__/
